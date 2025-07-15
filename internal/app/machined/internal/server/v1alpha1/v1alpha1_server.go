@@ -960,7 +960,15 @@ func (s *Server) DiskUsage(req *machine.DiskUsageRequest, obj machine.MachineSer
 			continue
 		}
 
-		files, err := archiver.Walker(obj.Context(), path, archiver.WithMaxRecurseDepth(-1))
+		opts := []archiver.WalkerOption{
+			archiver.WithMaxRecurseDepth(-1),
+		}
+
+		if path == "/" {
+			opts = append(opts, archiver.WithSkipPseudoFS())
+		}
+
+		files, err := archiver.Walker(obj.Context(), path, opts...)
 		if err != nil {
 			err = obj.Send(
 				&machine.DiskUsageInfo{

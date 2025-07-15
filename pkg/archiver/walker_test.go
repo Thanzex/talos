@@ -39,6 +39,7 @@ func (suite *WalkerSuite) TestIterationDir() {
 		"dev", "dev/random",
 		"etc", "etc/certs", "etc/certs/ca.crt", "etc/hostname",
 		"lib", "lib/dynalib.so",
+		"proc", "proc/1", "proc/1/exe", "proc/stat",
 		"usr", "usr/bin", "usr/bin/cp", "usr/bin/mv",
 	},
 		relPaths)
@@ -73,28 +74,28 @@ func (suite *WalkerSuite) TestIterationMaxRecurseDepth() {
 	}{
 		{
 			maxDepth: -1,
-			result:   []string{".", "dev", "dev/random", "etc", "etc/certs", "etc/certs/ca.crt", "etc/hostname", "lib", "lib/dynalib.so", "usr", "usr/bin", "usr/bin/cp", "usr/bin/mv"},
+			result:   []string{".", "dev", "dev/random", "etc", "etc/certs", "etc/certs/ca.crt", "etc/hostname", "lib", "lib/dynalib.so", "proc", "proc/1", "proc/1/exe", "proc/stat", "usr", "usr/bin", "usr/bin/cp", "usr/bin/mv"},
 		},
 		{
 			// confusing case
 			maxDepth: 0,
-			result:   []string{".", "dev", "etc", "lib", "usr"},
+			result:   []string{".", "dev", "etc", "lib", "proc", "usr"},
 		},
 		{
 			maxDepth: 1,
-			result:   []string{".", "dev", "etc", "lib", "usr"},
+			result:   []string{".", "dev", "etc", "lib", "proc", "usr"},
 		},
 		{
 			maxDepth: 2,
-			result:   []string{".", "dev", "dev/random", "etc", "etc/certs", "etc/hostname", "lib", "lib/dynalib.so", "usr", "usr/bin"},
+			result:   []string{".", "dev", "dev/random", "etc", "etc/certs", "etc/hostname", "lib", "lib/dynalib.so", "proc", "proc/1", "proc/stat", "usr", "usr/bin"},
 		},
 		{
 			maxDepth: 3,
-			result:   []string{".", "dev", "dev/random", "etc", "etc/certs", "etc/certs/ca.crt", "etc/hostname", "lib", "lib/dynalib.so", "usr", "usr/bin", "usr/bin/cp", "usr/bin/mv"},
+			result:   []string{".", "dev", "dev/random", "etc", "etc/certs", "etc/certs/ca.crt", "etc/hostname", "lib", "lib/dynalib.so", "proc", "proc/1", "proc/1/exe", "proc/stat", "usr", "usr/bin", "usr/bin/cp", "usr/bin/mv"},
 		},
 		{
 			maxDepth: 4,
-			result:   []string{".", "dev", "dev/random", "etc", "etc/certs", "etc/certs/ca.crt", "etc/hostname", "lib", "lib/dynalib.so", "usr", "usr/bin", "usr/bin/cp", "usr/bin/mv"},
+			result:   []string{".", "dev", "dev/random", "etc", "etc/certs", "etc/certs/ca.crt", "etc/hostname", "lib", "lib/dynalib.so", "proc", "proc/1", "proc/1/exe", "proc/stat", "usr", "usr/bin", "usr/bin/cp", "usr/bin/mv"},
 		},
 	} {
 		suite.Run(strconv.Itoa(test.maxDepth), func() {
@@ -183,9 +184,80 @@ func (suite *WalkerSuite) TestIterationTypes() {
 	}
 
 	suite.Assert().Equal([]string{
-		".", "dev", "etc", "etc/certs", "lib", "usr", "usr/bin",
+		".", "dev", "etc", "etc/certs", "lib", "proc", "proc/1", "usr", "usr/bin",
 	},
 		relPaths)
+}
+
+func (suite *WalkerSuite) TestIterationSkipFn() {
+	opts := []archiver.WalkerOption{
+		archiver.WithMaxRecurseDepth(1),
+		archiver.WithSkipDirPatterns("etc"),
+	}
+	ch, err := archiver.Walker(context.Background(), suite.tmpDir, opts...)
+	suite.Require().NoError(err)
+
+	relPaths := []string(nil)
+
+	for fi := range ch {
+		suite.Require().NoError(fi.Error)
+		relPaths = append(relPaths, fi.RelPath)
+	}
+
+	suite.Assert().Equal([]string{
+		".", "dev", "lib", "proc", "usr",
+	}, relPaths)
+}
+
+func (suite *WalkerSuite) TestIterationSkipPseudoFS() {
+	opts := []archiver.WalkerOption{
+		archiver.WithMaxRecurseDepth(1),
+		archiver.WithSkipPseudoFS(),
+	}
+	ch, err := archiver.Walker(context.Background(), suite.tmpDir, opts...)
+	suite.Require().NoError(err)
+
+	relPaths := []string(nil)
+
+	for fi := range ch {
+		suite.Require().NoError(fi.Error)
+		relPaths = append(relPaths, fi.RelPath)
+	}
+
+	suite.Assert().Equal([]string{
+		".", "etc", "lib", "usr",
+	}, relPaths)
+}
+
+func (suite *WalkerSuite) TestIterationSkipDirPatternsNested() {
+	nestedDir := filepath.Join(suite.tmpDir, "var", "run", "test")
+	err := os.MkdirAll(nestedDir, 0o755)
+	suite.Require().NoError(err)
+	defer func() {
+		_ = os.RemoveAll(filepath.Join(suite.tmpDir, "var"))
+	}()
+
+	err = os.WriteFile(filepath.Join(nestedDir, "file.txt"), []byte("data"), 0o644)
+	suite.Require().NoError(err)
+
+	opts := []archiver.WalkerOption{
+		archiver.WithSkipDirPatterns("var/run*"),
+	}
+	ch, err := archiver.Walker(context.Background(), suite.tmpDir, opts...)
+	suite.Require().NoError(err)
+
+	var relPaths []string
+	for fi := range ch {
+		suite.Require().NoError(fi.Error)
+		relPaths = append(relPaths, fi.RelPath)
+	}
+
+	// Ensure that 'var/run' and its contents are skipped.
+	for _, p := range relPaths {
+		suite.NotContains(p, "var/run")
+		suite.NotContains(p, "var/run/test")
+		suite.NotContains(p, "var/run/test/file.txt")
+	}
 }
 
 func TestWalkerSuite(t *testing.T) {

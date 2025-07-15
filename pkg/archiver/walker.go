@@ -31,10 +31,11 @@ const (
 )
 
 type walkerOptions struct {
-	skipRoot        bool
-	maxRecurseDepth int
-	fnmatchPatterns []string
-	types           map[FileType]struct{}
+	skipRoot          bool
+	maxRecurseDepth   int
+	fnmatchPatterns   []string
+	fnskipDirPatterns []string
+	types             map[FileType]struct{}
 }
 
 // WalkerOption configures Walker.
@@ -45,6 +46,20 @@ func WithSkipRoot() WalkerOption {
 	return func(o *walkerOptions) {
 		o.skipRoot = true
 	}
+}
+
+// WithSkipDirPatterns skips directories matching the patterns.
+func WithSkipDirPatterns(patterns ...string) WalkerOption {
+	return func(o *walkerOptions) {
+		o.fnskipDirPatterns = append(o.fnskipDirPatterns, patterns...)
+	}
+}
+
+// Skip pseudo-filesystems like /proc, /sys, /dev, /run, /var/run.
+// This is useful for Linux systems where these directories contain virtual filesystems
+// that do not need to be archived.
+func WithSkipPseudoFS() WalkerOption {
+	return WithSkipDirPatterns("proc", "sys", "dev", "run", "var/run")
 }
 
 // WithMaxRecurseDepth controls maximum recursion depth while walking file tree.
@@ -112,6 +127,7 @@ func Walker(ctx context.Context, rootPath string, options ...WalkerOption) (<-ch
 				FileInfo: fileInfo,
 				Error:    walkErr,
 			}
+
 			if path == rootPath && !fileInfo.IsDir() {
 				// only one file
 				item.RelPath = filepath.Base(path)
@@ -151,6 +167,14 @@ func Walker(ctx context.Context, rootPath string, options ...WalkerOption) (<-ch
 
 			if item.Error == nil && fileInfo.Mode()&os.ModeSymlink == os.ModeSymlink {
 				item.Link, item.Error = os.Readlink(path)
+			}
+
+			if item.Error == nil && fileInfo.IsDir() && len(opts.fnskipDirPatterns) > 0 {
+				for _, pattern := range opts.fnskipDirPatterns {
+					if matches, _ := filepath.Match(pattern, item.RelPath); matches { //nolint:errcheck
+						return filepath.SkipDir
+					}
+				}
 			}
 
 			if item.Error == nil && len(opts.fnmatchPatterns) > 0 {

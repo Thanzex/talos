@@ -55,6 +55,16 @@ var filesFixture = []struct {
 		Contents: []byte("SOME LIBRARY OUT THERE"),
 		Size:     20 * 1024,
 	},
+	{
+		Path:     "/proc/1/exe",
+		Mode:     0o755 | os.ModeSymlink,
+		Contents: []byte("/usr/bin/bash"),
+	},
+	{
+		Path:     "/proc/stat",
+		Mode:     0o444,
+		Contents: []byte("cpu  123456 7890 12345 67890 0 0 0 0 0 0"),
+	},
 }
 
 func (suite *CommonSuite) SetupSuite() {
